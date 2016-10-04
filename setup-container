@@ -1,0 +1,163 @@
+#!/bin/sh
+
+set -e
+
+ver_major()
+{ 
+  echo $1 | cut -d . -f 1
+}
+
+ver_minor()
+{
+  echo $1 | cut -d . -f 2
+}
+
+# Implements version inequality, for example:
+# 
+#  lver=10.2
+#  rver=10.3
+#  if ver_ineq $lver -lt $rver; then
+#     echo "$lver < $rver"
+#  else
+#     echo "$lver >= $rver"
+#  fi
+ver_ineq()
+{
+  [ `ver_major $1` $2 `ver_major $3` ] || \
+( [ `ver_major $1` -eq `ver_major $3` ] && [ `ver_minor $1` $2 `ver_minor $3` ] )
+}
+
+# Implements version equality
+# 
+#  lver=10.3
+#  rver=10.3
+#  if ver_eq $lver $rver; then
+#     echo "$lver == $rver"
+#  else
+#     echo "$lver != $rver"
+#  fi
+ver_eq()
+{
+  [ `ver_major $1` -eq `ver_major $2` ] && [ `ver_minor $1` -eq `ver_minor $2` ]
+}
+
+# Check if pkgng is active..
+# Return 0 if pkgng is active, or non-zero otherwise
+pkgng_active()
+{
+  # https://www.freebsd.org/cgi/man.cgi?query=pkg&apropos=0&sektion=8
+  TMPDIR=/dev/null ASSUME_ALWAYS_YES=yes \
+  PACKAGESITE=file:///nonexistent \
+  pkg info -x 'pkg(-devel)?$' >/dev/null 2>&1;
+}
+
+need_run_make_index()
+{
+  make search -C /usr/ports path='misc/figlet$' | \
+   grep 'Please run make index' > /dev/null 2>&1
+}
+
+
+SCRIPTDIR=`dirname $0`
+
+
+. $SCRIPTDIR/DISTINFO
+
+## Initialize /etc/resolv.conf if empty. docker-freebsd 1.7 does not preserve
+## changes to /etc/resolv.conf between steps.
+if [ -z `cat /etc/resolv.conf` ]; then
+  echo 'nameserver 8.8.8.8' >> /etc/resolv.conf
+  echo 'nameserver 8.8.4.4' >> /etc/resolv.conf
+fi
+
+osrelease=`echo $OSRELEASE | tr '[:upper:]' '[:lower:]'`
+
+if ver_ineq $OSVERSION -ge 9.2; then
+  echo "Bootstraping pkgng... "
+  # For FreeBSD > 9.2 we bootstrap pkgng this way:
+  pkg -N 2>&1 > /dev/null || ASSUME_ALWAYS_YES=yes pkg bootstrap -f
+  # Also, on some versions, we have to initialize "repos" list
+  if [ ! -e /usr/local/etc/pkg/repos ] &&  [ ! -e /etc/pkg ]; then
+    mkdir -p /usr/local/etc/pkg/repos
+    cat > /usr/local/etc/pkg/repos/FreeBSD.conf <<'!'
+FreeBSD: {
+  url: "pkg+http://pkg.FreeBSD.org/${ABI}/latest",
+  mirror_type: "srv",
+  signature_type: "none",
+  fingerprints: "/usr/share/keys/pkg",
+  enabled: yes
+}
+!
+  fi
+  pkg update
+else
+  echo -n "Preconfiguring old pkg utilities... "
+  # for FreeBSD <= 9.2 we will use pkg_add, pkg_delete, ...
+  export PACKAGESITE="ftp://ftp-archive.freebsd.org/pub/FreeBSD-Archive/ports/${ARCH}/packages-${osrelease}/Latest/"
+  echo "export PACKAGESITE=$PACKAGESITE" | tee -a /etc/profile
+  echo "setenv PACKAGESITE $PACKAGESITE" >> /etc/csh.cshrc
+  mkdir -p /usr/local/etc/sudoers.d && \
+    echo "Defaults env_keep += \"PACKAGESITE\"" >> /usr/local/etc/sudoers.d/packagesite && \
+    chmod 440 /usr/local/etc/sudoers.d/packagesite
+  test -e /etc/ssl/cert.pem || ln -s /usr/local/share/certs/ca-root-nss.crt /etc/ssl/cert.pem
+  echo "done"
+fi
+
+if pkgng_active; then
+  PKG_INSTALL="pkg install -y"
+  if ver_ineq $OSVERSION -le 9.3; then
+    echo 'WITH_PKGNG=yes' >> /etc/make.conf
+  fi
+else
+  PKG_INSTALL="pkg_add -r"
+fi
+
+## Common packages, e.g.
+# $PKG_INSTALL rsync
+# $PKG_INSTALL curl
+
+## Port-related packages
+$PKG_INSTALL port-maintenance-tools
+
+# Check if we are asked to run portsnap or not...
+case "$RUN_PORTSNAP" in
+  [yY]*|1)
+    script -t 0 -q /dev/stdout portsnap fetch
+    portsnap extract > /dev/null
+    ;;
+  *)
+    ;;
+esac
+
+# On some installation ports are not ready yet and require to run "make index"
+if need_run_make_index; then
+  echo -n 'Running "make index -C /usr/ports"...'
+  make index -C /usr/ports
+  echo "done"
+fi
+
+# Fix for hanging "script -qa ... " in pkgtools.rb used by portupgrade
+if [ -d '/usr/local/lib/ruby' ]; then
+  for F in `find /usr/local/lib/ruby -name 'pkgtools.rb' -type f`; do
+    UNCHMOD=false;
+    echo -n "Patching $F...";
+    test -w $F || (chmod u+w $F; UNCHMOD=true);
+    sed -e "s/\[script_path(), '-qa', file, \*args\]/[script_path(), '-t', '0', '-qa', file, \*args]/" \
+        -e "s/\['\/usr\/bin\/script', '-qa', file, \*args\]/['\/usr\/bin\/script', '-t', '0', '-qa', file, \*args]/" \
+        -i '' $F;
+    if $UNCHMOD; then chmod u-w $F; fi
+    echo "done"
+  done
+fi
+
+# Add ftp-archive as backup site for older FreeBSD versions
+if ver_ineq "$OSVERSION" -lt '9.3'; then
+  export MASTER_SITE_BACKUP='ftp://ftp-archive.freebsd.org/pub/FreeBSD-Archive/ports/distfiles/'
+  echo -n "Setting MASTER_SITE_BACKUP=$MASTER_SITE_BACKUP... "
+  echo "export MASTER_SITE_BACKUP=$MASTER_SITE_BACKUP" >> /etc/profile
+  echo "setenv MASTER_SITE_BACKUP $MASTER_SITE_BACKUP" >> /etc/csh.cshrc
+  test -e /usr/local/etc/sudoers.d || mkdir -p /usr/local/etc/sudoers.d
+  echo "Defaults env_keep += \"MASTER_SITE_BACKUP\"" >> /usr/local/etc/sudoers.d/mastersite
+  chmod 440 /usr/local/etc/sudoers.d/mastersite
+  echo "done"
+fi

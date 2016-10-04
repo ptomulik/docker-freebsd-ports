@@ -1,0 +1,6 @@
+*.swp
+*.bkp
+*.bak
+*~
+.tmp/
+tmp/
