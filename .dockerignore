@@ -1,0 +1,4 @@
+/fetch-distfiles
+/.git/
+/build
+/push

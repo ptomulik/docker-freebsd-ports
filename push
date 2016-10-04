@@ -1,0 +1,36 @@
+#!/bin/sh
+
+set -e
+
+. DISTINFO
+
+if [ $# -ge 1 ] && ( echo $1 | grep -e '^[^\/]\+\/[^\/]\+$' > /dev/nul 2>&1 ); then
+  DOCKER_USER="`echo ${1} | cut -d '/' -f 1`"
+  DOCKER_REPO="`echo ${1} | cut -d '/' -f 2`"
+  shift
+else
+  if [ -z "${DOCKER_USER}" ]; then DOCKER_USER=ptomulik; fi
+  if [ -z "${DOCKER_REPO}" ]; then DOCKER_REPO=freebsd-ports; fi
+fi
+
+if [ $# -ge 1 ] && ( echo $1 | grep -e '^[^@]\+@[^@]\+$' > /dev/nul 2>&1 ); then
+  DOCKER_EMAIL="${1}"
+elif [ "${DOCKER_USER}" = 'ptomulik' ]; then
+  DOCKER_EMAIL=ptomulik@meil.pw.edu.pl
+fi
+
+if [ -z "${DOCKER_USER}" ]; then
+  echo "error: you must provide docker username, for example: $0 user/repo" >&2
+  exit 1
+fi
+
+if [ -z "${DOCKER_REPO}" ]; then
+  echo "error: you must provide docker repository name, for example: $0 user/repo" >&2
+  exit 1
+fi
+
+if [ ! -z "${DOCKER_PASSWORD}" ] && [ ! -z "${DOCKER_EMAIL}" ]; then
+  docker login --email="${DOCKER_EMAIL}" --username="${DOCKER_USER}" --password="${DOCKER_PASSWORD}"
+fi
+
+docker push ${DOCKER_USER}/${DOCKER_REPO}:${ARCH}--${OSRELEASE}

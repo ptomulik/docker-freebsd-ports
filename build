@@ -1,0 +1,25 @@
+#!/bin/sh
+
+set -e
+
+. DISTINFO
+
+if [ $# -ge 1 ]; then
+  if echo $1 | grep -e '^[^\/]\+\/[^\/]\+$' > /dev/nul 2>&1; then
+    DOCKER_USER="`echo ${1} | cut -d '/' -f 1`"
+    DOCKER_REPO="`echo ${1} | cut -d '/' -f 2`"
+    shift
+  else
+    DOCKER_REPO="$1"
+    shift
+  fi
+else
+  if [ -z "${DOCKER_USER}" ]; then DOCKER_USER=ptomulik; fi
+  if [ -z "${DOCKER_REPO}" ]; then DOCKER_REPO=freebsd-ports; fi
+fi
+
+if [ -z "${DOCKER_USER}" ]; then
+  docker build --tag=${DOCKER_REPO}:${ARCH}--${OSRELEASE}
+else
+  docker build --tag=${DOCKER_USER}/${DOCKER_REPO}:${ARCH}--${OSRELEASE}
+fi
