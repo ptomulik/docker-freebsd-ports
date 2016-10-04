@@ -19,7 +19,7 @@ else
 fi
 
 if [ -z "${DOCKER_USER}" ]; then
-  docker build --tag=${DOCKER_REPO}:${ARCH}--${OSRELEASE}
+  docker build --tag=${DOCKER_REPO}:${ARCH}--${OSRELEASE} .
 else
-  docker build --tag=${DOCKER_USER}/${DOCKER_REPO}:${ARCH}--${OSRELEASE}
+  docker build --tag=${DOCKER_USER}/${DOCKER_REPO}:${ARCH}--${OSRELEASE} .
 fi

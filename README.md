@@ -1,6 +1,6 @@
 # docker-freebsd-ports
 
-FreeBSD docker images from distribution archive
+FreeBSD docker images from distribution archive with ports preinstalled
 
 ## Requirements
 
